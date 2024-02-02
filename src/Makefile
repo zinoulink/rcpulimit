@@ -12,7 +12,7 @@ endif
 all::	$(TARGETS) $(LIBS)
 
 cpulimit:	cpulimit.c $(LIBS)
-	$(CC) -o rcpulimit cpulimit.c $(LIBS) $(CFLAGS)
+	$(CC) -o rcpu cpulimit.c $(LIBS) $(CFLAGS)
 
 process_iterator.o: process_iterator.c process_iterator.h
 	$(CC) -c process_iterator.c $(CFLAGS)

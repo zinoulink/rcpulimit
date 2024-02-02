@@ -1,5 +1,5 @@
 *.o
 *~
-src/rcpulimit
+src/rcpu
 busy
 process_iterator_test
