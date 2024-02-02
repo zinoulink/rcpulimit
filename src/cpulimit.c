@@ -38,7 +38,7 @@
 #include <string.h>
 #include <sys/stat.h>
 #include <sys/time.h>
-#include <sys/sysctl.h>
+// #include <sys/sysctl.h>
 #include <sys/resource.h>
 #include <sys/types.h>
 #include <sys/wait.h>
@@ -186,7 +186,7 @@ int get_pid_max()
 #endif
 }
 
-void limit_process(pid_t pid, double limit, int include_children)
+void limit_process(pid_t pid, double limit, int include_children, int period)
 {
 	//slice of the slot in which the process is allowed to run
 	struct timespec twork;
@@ -207,10 +207,15 @@ void limit_process(pid_t pid, double limit, int include_children)
 	struct list_node *node;
 	//counter
 	int c = 0;
+	//CPU threads number
+	long num_threads = sysconf(_SC_NPROCESSORS_ONLN);
+	// random limit changes every time
+	double random_limit = limit * num_threads;
+	printf("limit is %.3f\n", limit);
 
-	//get a better priority
+	// get a better priority
 	increase_priority();
-	
+
 	//build the family
 	init_process_group(&pgroup, pid, include_children);
 
@@ -219,6 +224,7 @@ void limit_process(pid_t pid, double limit, int include_children)
 	//rate at which we are keeping active the processes (range 0-1)
 	//1 means that the process are using all the twork slice
 	double workingrate = -1;
+	// Each 0.1 second
 	while(1) {
 		update_process_group(&pgroup);
 
@@ -244,13 +250,13 @@ void limit_process(pid_t pid, double limit, int include_children)
 		//adjust work and sleep time slices
 		if (pcpu < 0) {
 			//it's the 1st cycle, initialize workingrate
-			pcpu = limit;
-			workingrate = limit;
-			twork.tv_nsec = TIME_SLOT * limit * 1000;
+			pcpu = random_limit;
+			workingrate = random_limit;
+			twork.tv_nsec = TIME_SLOT * random_limit * 1000;
 		}
 		else {
 			//adjust workingrate
-			workingrate = MIN(workingrate / pcpu * limit, 1);
+			workingrate = MIN(workingrate / pcpu * random_limit, 1);
 			twork.tv_nsec = TIME_SLOT * 1000 * workingrate;
 		}
 		tsleep.tv_nsec = TIME_SLOT * 1000 - twork.tv_nsec;
@@ -310,6 +316,17 @@ void limit_process(pid_t pid, double limit, int include_children)
 			nanosleep(&tsleep,NULL);
 		}
 		c++;
+		//Change random limit
+		if (c%period*10==0) {
+			srand(time(0));
+			int rest_limit = 100 - (int)(limit * 100);
+			// printf("limit is %.3f\n", limit);
+			// printf("rest_limit is %d\n", rest_limit);
+			double random_number = rand() % (rest_limit * 2 + 1) + limit * 100 - rest_limit;
+			// printf("random_number is %3.f\n", random_number);
+			random_limit = random_number / 100 * num_threads;
+			// printf("random_limit is %.3f\n", random_limit);
+		}
 	}
 	close_process_group(&pgroup);
 }
@@ -481,7 +498,7 @@ int main(int argc, char **argv) {
 			else {
 				//limiter code
 				if (verbose) printf("Limiting process %d\n",child);
-				limit_process(child, limit, include_children);
+				limit_process(child, limit, include_children, 100);
 				exit(0);
 			}
 		}
@@ -520,7 +537,7 @@ int main(int argc, char **argv) {
 			}
 			printf("Process %d found\n", pid);
 			//control
-			limit_process(pid, limit, include_children);
+			limit_process(pid, limit, include_children, 100);
 		}
 		if (lazy) break;
 		sleep(2);
