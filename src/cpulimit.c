@@ -220,9 +220,12 @@ void limit_process(pid_t pid, double limit, int include_children, int period)
 	// CPU threads number
 	long num_threads = sysconf(_SC_NPROCESSORS_ONLN);
 	// random limit changes every time
+	time_t old_time;
+	time_t new_time;
 	int random_period = period;
 	double random_limit = limit * num_threads;
-	printf("limit is %.3f\n", limit);
+	time(&old_time);
+	printf("limit: %.0f%%, period: %ds\n", limit * 100, random_period / 10);
 
 	// get a better priority
 	increase_priority();
@@ -346,25 +349,19 @@ void limit_process(pid_t pid, double limit, int include_children, int period)
 		// Change random limit
 		if (c % random_period * 10 == 0)
 		{
-			time_t old_time;
-			time_t new_time;
-			time(&new_time);
-			printf("seconds %ld\n\n", new_time - old_time);
-
 			srand(time(0));
 			int rest_limit = 100 - (int)(limit * 100);
-			// printf("limit is %.3f\n", limit);
-			// printf("rest_limit is %d\n", rest_limit);
 			double random_number = (rand() % (rest_limit * 2)) + limit * 100 - rest_limit;
-			// printf("random_number is %3.f\n", random_number);
 			random_limit = random_number / 100 * num_threads;
-			printf("random_limit is %.3f\n", random_number);
 
-			old_time = new_time;
 			srand(time(0));
+			// generate a random floating-point number between 1.0 and 9.9
 			random_number = ((rand() % 90) + 10) / 10.0;
 			random_period = period * random_number;
-			printf("random_period is %d\n", random_period);
+			
+			time(&new_time);
+			printf("last time: %lds, limit: %.0f%%, period: %ds\n", new_time - old_time, random_limit * 100 / num_threads, random_period / 10);
+			old_time = new_time;
 			// random_period = random_period / ( 1 - random_limit / num_threads);
 		}
 	}
@@ -574,7 +571,7 @@ int main(int argc, char **argv)
 				// limiter code
 				if (verbose)
 					printf("Limiting process %d\n", child);
-				limit_process(child, limit, include_children, 100);
+				limit_process(child, limit, include_children, period * 10);
 				exit(0);
 			}
 		}
@@ -623,7 +620,7 @@ int main(int argc, char **argv)
 			}
 			printf("Process %d found\n", pid);
 			// control
-			limit_process(pid, limit, include_children, 100);
+			limit_process(pid, limit, include_children, period * 10);
 		}
 		if (lazy)
 			break;
