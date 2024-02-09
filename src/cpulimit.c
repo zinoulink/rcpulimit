@@ -196,7 +196,7 @@ int get_pid_max()
 #endif
 }
 
-void limit_process(pid_t pid, double limit, int include_children, int period)
+void limit_process(pid_t pid, int include_children, int period, int min, int max)
 {
 	// slice of the slot in which the process is allowed to run
 	struct timespec twork;
@@ -223,9 +223,9 @@ void limit_process(pid_t pid, double limit, int include_children, int period)
 	time_t old_time;
 	time_t new_time;
 	int random_period = period;
-	double random_limit = limit * num_threads;
+	double random_limit = ((max - min) / 2 + min) / 100.0 * num_threads;
 	time(&old_time);
-	printf("limit: %.0f%%, period: %ds\n", limit * 100, random_period / 10);
+	printf("limit: %.0f%%, period: %ds\n", random_limit * 100 / num_threads, random_period / 10);
 
 	// get a better priority
 	increase_priority();
@@ -346,19 +346,20 @@ void limit_process(pid_t pid, double limit, int include_children, int period)
 			nanosleep(&tsleep, NULL);
 		}
 		c++;
+		if (c > 1000000000)
+			c = 0;
 		// Change random limit
 		if (c % random_period * 10 == 0)
 		{
 			srand(time(0));
-			int rest_limit = 100 - (int)(limit * 100);
-			double random_number = (rand() % (rest_limit * 2)) + limit * 100 - rest_limit;
-			random_limit = random_number / 100 * num_threads;
+			double random_number = (rand() % (max - min)) + min;
+			random_limit = random_number / 100.0 * num_threads;
 
 			srand(time(0));
 			// generate a random floating-point number between 1.0 and 9.9
 			random_number = ((rand() % 90) + 10) / 10.0;
 			random_period = period * random_number;
-			
+
 			time(&new_time);
 			printf("last time: %lds, limit: %.0f%%, period: %ds\n", new_time - old_time, random_limit * 100 / num_threads, random_period / 10);
 			old_time = new_time;
@@ -374,10 +375,14 @@ int main(int argc, char **argv)
 	const char *exe = NULL;
 	int perclimit = 0;
 	int period = 0;
+	int min = 0;
+	int max = 0;
 	int exe_ok = 0;
 	int pid_ok = 0;
 	int limit_ok = 0;
 	int period_ok = 0;
+	int min_ok = 0;
+	int max_ok = 0;
 	pid_t pid = 0;
 	int include_children = 0;
 
@@ -393,13 +398,15 @@ int main(int argc, char **argv)
 	int next_option;
 	int option_index = 0;
 	// A string listing valid short options letters
-	const char *short_options = "+p:e:l:t:vzih";
+	const char *short_options = "+p:e:l:t:n:x:vzih";
 	// An array describing valid long options
 	const struct option long_options[] = {
 		{"pid", required_argument, NULL, 'p'},
 		{"exe", required_argument, NULL, 'e'},
 		{"limit", required_argument, NULL, 'l'},
 		{"period", required_argument, NULL, 't'},
+		{"min", required_argument, NULL, 'n'},
+		{"max", required_argument, NULL, 'x'},
 		{"verbose", no_argument, NULL, 'v'},
 		{"lazy", no_argument, NULL, 'z'},
 		{"include-children", no_argument, NULL, 'i'},
@@ -426,6 +433,14 @@ int main(int argc, char **argv)
 		case 't':
 			period = atoi(optarg);
 			period_ok = 1;
+			break;
+		case 'n':
+			min = atoi(optarg);
+			min_ok = 1;
+			break;
+		case 'x':
+			max = atoi(optarg);
+			max_ok = 1;
 			break;
 		case 'v':
 			verbose = 1;
@@ -460,25 +475,37 @@ int main(int argc, char **argv)
 		lazy = 1;
 	}
 
-	if (!limit_ok)
-	{
-		fprintf(stderr, "Error: You must specify a cpu limit percentage\n");
-		print_usage(stderr, 1);
-		exit(1);
-	}
+	// if (!limit_ok)
+	// {
+	// 	fprintf(stderr, "Error: You must specify a cpu limit percentage\n");
+	// 	print_usage(stderr, 1);
+	// 	exit(1);
+	// }
 	if (!period_ok)
 	{
 		fprintf(stderr, "Error: You must specify a period\n");
 		print_usage(stderr, 1);
 		exit(1);
 	}
-	double limit = perclimit / 100.0;
-	if (limit < 0 || limit > NCPU)
+	if (!min_ok)
 	{
-		fprintf(stderr, "Error: limit must be in the range 0-%d00\n", NCPU);
+		fprintf(stderr, "Error: You must specify a minimum limit\n");
 		print_usage(stderr, 1);
 		exit(1);
 	}
+	if (!max_ok)
+	{
+		fprintf(stderr, "Error: You must specify a maximum limit\n");
+		print_usage(stderr, 1);
+		exit(1);
+	}
+	// double limit = perclimit / 100.0;
+	// if (limit < 0 || limit > NCPU)
+	// {
+	// 	fprintf(stderr, "Error: limit must be in the range 0-%d00\n", NCPU);
+	// 	print_usage(stderr, 1);
+	// 	exit(1);
+	// }
 
 	int command_mode = optind < argc;
 	if (exe_ok + pid_ok + command_mode == 0)
@@ -571,7 +598,7 @@ int main(int argc, char **argv)
 				// limiter code
 				if (verbose)
 					printf("Limiting process %d\n", child);
-				limit_process(child, limit, include_children, period * 10);
+				limit_process(child, include_children, period * 10, min, max);
 				exit(0);
 			}
 		}
@@ -620,7 +647,7 @@ int main(int argc, char **argv)
 			}
 			printf("Process %d found\n", pid);
 			// control
-			limit_process(pid, limit, include_children, period * 10);
+			limit_process(pid, include_children, period * 10, min, max);
 		}
 		if (lazy)
 			break;
